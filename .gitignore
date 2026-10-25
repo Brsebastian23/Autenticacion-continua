@@ -1,0 +1,30 @@
+# Variables de entorno con secretos (NO subir al repo)
+.env
+.env.local
+.env.*.local
+**/.env
+
+# Python
+__pycache__/
+*.pyc
+venv/
+db.sqlite3
+
+# NOTA: los .joblib del dataset SÍ se versionan (van dentro de la imagen Docker).
+# Solo se ignoran los modelos de usuario entrenados en runtime.
+ml_models/iforest_user-*.joblib
+
+# Java
+Backend/target/
+
+# Node / Front
+node_modules/
+dist/
+
+# Logs y temporales
+*.log
+tmp/
+
+# Sistema
+.DS_Store
+**/.DS_Store

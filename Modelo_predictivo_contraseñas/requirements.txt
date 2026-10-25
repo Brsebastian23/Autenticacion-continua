@@ -1,0 +1,12 @@
+Django
+djangorestframework
+dj-database-url
+python-dotenv
+gunicorn
+whitenoise
+psycopg2-binary
+scikit-learn
+numpy
+joblib
+scipy
+pandas
