@@ -1,35 +1,30 @@
-# Render Blueprint — despliegue completo del sistema de autenticación continua.
+# Render Blueprint — despliegue completo (PLAN GRATUITO / FREE).
 #
 # Estructura del repo:
 #   Front/                         -> sitio estático (React/Vite)
 #   Backend/                       -> Web Service Java (Docker, Spring Boot)
-#   Modelo_predictivo_contrasenas/ -> Web Service Python (Docker, Django) + Disco
+#   Modelo_predictivo_contrasenas/ -> Web Service Python (Docker, Django)
 #
-# Uso:
-#   1. En Render: "New" -> "Blueprint" -> conecta este repositorio.
-#   2. Render detecta este archivo y crea los 3 servicios + la base de datos.
-#   3. Define los secretos marcados como `sync: false` en el panel.
+# NOTA sobre persistencia (plan free):
+#   - El plan gratuito NO permite Discos persistentes.
+#   - Los modelos del DATASET (sXXX) SI sobreviven: van empaquetados en la imagen.
+#   - Los modelos de USUARIO (user-*) y de cursor viven en el contenedor y se
+#     pierden en cada redeploy/reinicio. Para persistirlos de verdad se necesita
+#     plan Starter + Disco, o almacenamiento de objetos (fase futura).
 #
-# Orden de dependencias: el backend necesita la URL del ML (ML_BASE_URL) y el
-# front necesita la URL del backend (VITE_API_URL). Se resuelven con `fromService`.
+# Uso: New > Blueprint > conectar repo. Render crea 3 servicios + 1 base de datos.
+# Los secretos `sync: false` se rellenan en el panel tras el primer deploy.
 
 services:
   # 1) Microservicio de ML (Django + scikit-learn) ---------------------------------
   - type: web
     name: continuous-auth-ml
     runtime: docker
-    plan: starter
+    plan: free
     rootDir: Modelo_predictivo_contrasenas
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/metrics/summary/
-    numInstances: 1
-    disks:
-      - name: user-models
-        mountPath: /data
-        sizeGB: 1
     envVars:
-      - key: ML_USER_MODELS_DIR
-        value: /data/user_models
       - key: DJANGO_DEBUG
         value: "false"
       - key: DJANGO_SECRET_KEY
@@ -38,6 +33,7 @@ services:
         value: "2"
       - key: ML_DECISION_THRESHOLD
         value: "0.021328"
+      # Sin disco: sin ML_USER_MODELS_DIR => modelos de usuario en el contenedor.
       - key: DATABASE_URL
         fromDatabase:
           name: continuous-auth-db
@@ -47,7 +43,7 @@ services:
   - type: web
     name: continuous-auth-backend
     runtime: docker
-    plan: starter
+    plan: free
     rootDir: Backend
     dockerfilePath: ./Dockerfile
     envVars:
@@ -55,9 +51,7 @@ services:
         generateValue: true
       - key: CORS_ALLOWED_ORIGINS
         value: "*"
-      # URL COMPLETA del ML con http:// (p. ej. https://continuous-auth-ml.onrender.com).
-      # `fromService` solo da host:puerto (sin esquema) y el cliente Java necesita
-      # la URL completa, por eso se rellena en el panel tras el primer deploy.
+      # URL COMPLETA del ML con http(s):// . Se rellena en el panel.
       - key: ML_BASE_URL
         sync: false
       - key: DATABASE_URL
@@ -65,7 +59,7 @@ services:
           name: continuous-auth-db
           property: connectionString
 
-  # 3) Frontend (React + Vite, build estático) -------------------------------------
+  # 3) Frontend (React + Vite, build estatico) -------------------------------------
   - type: web
     name: continuous-auth-front
     runtime: static
@@ -73,8 +67,7 @@ services:
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     envVars:
-      # URL COMPLETA del front para el backend, con /api (p. ej.
-      # https://continuous-auth-backend.onrender.com/api). Se rellena en el panel.
+      # URL COMPLETA del backend + /api . Se rellena en el panel.
       - key: VITE_API_URL
         sync: false
     routes:
@@ -87,3 +80,4 @@ databases:
     plan: free
     databaseName: continuous_auth
     user: continuous_auth
+
