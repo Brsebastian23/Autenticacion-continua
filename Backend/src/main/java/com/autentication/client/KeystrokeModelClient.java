@@ -31,6 +31,37 @@ public interface KeystrokeModelClient {
     TrainingResult retrain(String keystrokeModelId, List<Map<String, Double>> samples);
 
     /**
+     * Obtiene el resumen de métricas de exactitud (EER/FAR/FRR/AUC) del
+     * benchmark persistido en el microservicio ML ({@code /api/metrics/summary/}).
+     *
+     * @return mapa JSON normalizado con las métricas.
+     */
+    Map<String, Object> metricsSummary();
+
+    /**
+     * Obtiene los puntos de la curva FAR vs FRR ({@code /api/metrics/curve/}).
+     *
+     * @return mapa JSON normalizado con la curva.
+     */
+    Map<String, Object> metricsCurve();
+
+    /**
+     * Entrena el modelo de cursor del usuario ({@code /api/cursor/retrain/}).
+     *
+     * @param payload cuerpo JSON ya construido (user_id + records | synthetic).
+     * @return resultado normalizado del entrenamiento de cursor.
+     */
+    Map<String, Object> cursorRetrain(Map<String, Object> payload);
+
+    /**
+     * Inferencia de cursor ({@code /api/cursor/predict/}).
+     *
+     * @param payload cuerpo JSON (user_id + record).
+     * @return resultado normalizado de la inferencia.
+     */
+    Map<String, Object> cursorPredict(Map<String, Object> payload);
+
+    /**
      * Resultado de inferencia devuelto por el modelo.
      *
      * @param legitimate      si la muestra corresponde al usuario legítimo.

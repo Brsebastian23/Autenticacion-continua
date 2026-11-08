@@ -8,11 +8,16 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 db.sqlite3
 
 # NOTA: los .joblib del dataset SÍ se versionan (van dentro de la imagen Docker).
 # Solo se ignoran los modelos de usuario entrenados en runtime.
-ml_models/iforest_user-*.joblib
+# `**/` cubre ml_models/ tanto en la raíz como dentro de Modelo_predictivo_contrasenas/.
+
+
+**/ml_models/iforest_user-*.joblib
+**/ml_models/cursor_iforest_*.joblib
 
 # Java
 Backend/target/
@@ -24,6 +29,9 @@ dist/
 # Logs y temporales
 *.log
 tmp/
+
+# IDE (configuración local; puede contener rutas o secretos)
+.vscode/
 
 # Sistema
 .DS_Store

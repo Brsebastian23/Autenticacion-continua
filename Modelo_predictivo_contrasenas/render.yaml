@@ -1,0 +1,40 @@
+# Render Blueprint — Microservicio ML (Django) con Docker + Disco persistente.
+#
+# Por qué Docker: el Dockerfile define el ENTRYPOINT (docker-entrypoint.sh) que
+# crea el volumen, aplica migraciones, hace seed de modelos y el benchmark. Con
+# `runtime: python` ese entrypoint NO se ejecuta; con Docker sí.
+#
+# Disco persistente:
+#   - Modelos de usuario (user-*) y de cursor -> /data/user_models  (persistente)
+#   - Modelos de dataset (sXXX) -> dentro de la imagen               (inmutables)
+#
+# Un Render Disk va atado a UNA instancia por eso numInstances=1.
+
+services:
+  - type: web
+    name: continuous-auth-ml
+    runtime: docker
+    plan: starter
+    rootDir: Modelo_predictivo_contrasenas
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/metrics/summary/
+    numInstances: 1
+    disks:
+      - name: user-models
+        mountPath: /data
+        sizeGB: 1
+    envVars:
+      # Modelos de usuario en el volumen persistente (mutable).
+      - key: ML_USER_MODELS_DIR
+        value: /data/user_models
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # Umbral calibrado (opcional; por defecto 0.021328).
+      - key: ML_DECISION_THRESHOLD
+        value: "0.021328"
+      # DATABASE_URL se define en el panel de Render (Postgres de Render o Supabase).
+      # ALLOWED_HOSTS se completa solo con RENDER_EXTERNAL_HOSTNAME.

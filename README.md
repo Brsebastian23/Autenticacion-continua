@@ -34,6 +34,7 @@ Este repositorio implementa el sistema completo en tres piezas independientes:
 12. [Variables de entorno](#12-variables-de-entorno)
 13. [Estructura del repositorio](#13-estructura-del-repositorio)
 14. [Estado actual y limitaciones conocidas](#14-estado-actual-y-limitaciones-conocidas)
+15. [Referencias](#referencias)
 
 ---
 
@@ -242,9 +243,11 @@ score = float(model.decision_function(vector)[0])
 is_legitimate = score >= float(settings.ML_DECISION_THRESHOLD)   # umbral configurable
 ```
 
-Donde `ML_DECISION_THRESHOLD` es configurable por entorno (por defecto `0.0`). **Subir el umbral**
-endurece la verificación (menos impostores aceptados, más usuarios legítimos rechazados); bajarlo
-hace lo contrario. Es la palanca de política de riesgo FAR vs FRR.
+Donde `ML_DECISION_THRESHOLD` es configurable por entorno. Por defecto se usa el
+**umbral óptimo calibrado `+0.021328`** (minimiza |FAR − FRR|), quedando `0.0` (la frontera
+natural del algoritmo) como **línea base** documentada. **Subir el umbral** endurece la
+verificación (menos impostores aceptados, más usuarios legítimos rechazados); bajarlo hace lo
+contrario. Es la palanca de política de riesgo FAR vs FRR.
 
 El score se devuelve tal cual al frontend como `confidence_score`, junto con la decisión y la
 latencia. La decisión queda además clasificada como `LEGITIMATE`, `ANOMALY` o `ERROR` en la tabla de
@@ -518,13 +521,17 @@ Con un umbral `t` (se acepta si `score >= t`):
 | **EER** | Umbral donde **FAR == FRR**. | Compromiso único FAR/FRR; más bajo = mejor. |
 | **AUC-ROC** | Prob. de que un genuino puntúe más alto que un impostor. | Poder de separación (independiente del umbral). |
 
-**Resultados de referencia** (split por sesión, 51 sujetos, `ML_DECISION_THRESHOLD = 0.0`):
+**Resultados de referencia** (split por sesión, 51 sujetos). Por defecto el umbral es el óptimo
+calibrado `+0.021328`; `0.0` se conserva como línea base:
 
-- **FAR ~ 27 %** (impostores aceptados).
-- **FRR ~ 9 %** (genuinos rechazados).
+| Umbral | FAR | FRR | Accuracy |
+|---|---|---|---|
+| 0.0 (línea base) | ≈ 27.8 % | ≈ 6.0 % | ≈ 72.6 % |
+| **+0.021328 (por defecto, óptimo)** | ≈ 16.3 % | ≈ 11.1 % | ≈ 83.8 % |
 
-El sistema prioriza **minimizar el FRR** (no molestar al usuario real); subir el umbral reduce FAR a
-costa de aumentar FRR. La calibración fina se obtiene con `python manage.py evaluate_models`.
+El EER (~12.19 %) es invariante al umbral. El umbral es configurable (`ML_DECISION_THRESHOLD`)
+para ajustar la política de riesgo. La calibración fina se obtiene con
+`python manage.py evaluate_models` o `python manage.py benchmark_report`.
 
 ---
 
@@ -568,8 +575,10 @@ Cada componente trae su `Dockerfile`:
 - **Modelo**: `settings.py` usa SQLite por defecto y PostgreSQL si existe `DATABASE_URL`
   (`dj-database-url`). Soporta `ALLOWED_HOSTS` para Render/Fly.
 
-> **Nota**: el sistema de ficheros del contenedor puede ser efímero; los `.joblib` de usuarios
-> propios deberían persistirse en un volumen externo (ver §14).
+> **Nota**: el filesystem del contenedor es efímero. Por eso los modelos **propios** de usuario
+> (`user-*`) y los de cursor se guardan en `ML_USER_MODELS_DIR`, que en despliegue apunta a un
+> **volumen persistente** (Disco de Render montado en `/data/user_models`). Los modelos del
+> **dataset** (`sXXX`) permanecen en la imagen, ya que son inmutables. Ver §5.7.
 
 ---
 
@@ -593,13 +602,14 @@ Cada componente trae su `Dockerfile`:
 
 | Variable | Por defecto | Descripción |
 |---|---|---|
-| `DJANGO_SECRET_KEY` | (dev) | Secreto de Django. **Obligatorio en producción.** |
+| `DJANGO_SECRET_KEY` | (dev) | Secreto de Django. **Obligatorio en producción**: con `DEBUG=False` el arranque falla si falta. |
 | `DJANGO_DEBUG` | `True` | Modo debug. |
 | `ALLOWED_HOSTS` | `localhost,...` | Hosts permitidos. |
 | `DATABASE_URL` | — | PostgreSQL; si falta, SQLite. |
-| `ML_MODELS_DIR` | `ml_models/` | Directorio de los `.joblib`. |
+| `ML_MODELS_DIR` | `ml_models/` | Directorio de los `.joblib` del dataset (inmutable, en la imagen). |
+| `ML_USER_MODELS_DIR` | = `ML_MODELS_DIR` | Directorio de los modelos de usuario (`user-*`) y de cursor. En producción apunta al volumen persistente (`/data/user_models`). |
 | `DATASET_PATH` | `data/DSL-StrongPasswordData.csv` | Dataset CMU. |
-| `ML_DECISION_THRESHOLD` | `0.0` | Umbral de decisión LEGITIMATE/ANOMALY. |
+| `ML_DECISION_THRESHOLD` | `0.021328` | Umbral de decisión LEGITIMATE/ANOMALY (óptimo calibrado; `0.0` = línea base). |
 
 ### Frontend
 
@@ -640,7 +650,7 @@ Cada componente trae su `Dockerfile`:
     ├── continuous_auth/               # settings, urls, wsgi/asgi
     ├── ml_models/                      # iforest_*.joblib (un modelo por usuario)
     ├── data/DSL-StrongPasswordData.csv # Dataset CMU
-    └── Dockerfile / docker-entrypoint.sh / build.sh
+    └── Dockerfile / docker-entrypoint.sh / build.sh / render.yaml
 ```
 
 ---
@@ -658,18 +668,44 @@ Cada componente trae su `Dockerfile`:
 
 **Limitaciones y trabajo pendiente:**
 
-1. **Calibración formal del umbral** (curva FAR vs FRR / EER) y fijarlo en producción.
+1. ~~Calibración formal del umbral (curva FAR vs FRR / EER) y fijarlo en producción.~~
+   **Resuelto**: umbral óptimo `+0.021328` fijado por defecto; `0.0` conservado como línea base
+   (§10).
 2. **Endurecer la verificación frente a impostores "promedio"**. IsolationForest es permisivo con
    patrones raros pero globalmente normales (§5.6). Evaluar un enfoque híbrido: detector de
    anomalías + clasificador supervisado entrenado con muestras de otros sujetos como
    pseudo-impostores. Es una decisión de producto, no solo técnica.
-3. **Persistencia de modelos en producción** más allá del filesystem del contenedor (volumen
-   persistente u objeto externo), ya que puede ser efímero.
-4. **Secretos por variable de entorno** (`APP_JWT_SECRET`, `DJANGO_SECRET_KEY`) en despliegue.
-5. **Pruebas automatizadas** de los endpoints y del servicio ML.
+3. ~~Persistencia de modelos en producción más allá del filesystem del contenedor (volumen
+   persistente u objeto externo), ya que puede ser efímero.~~
+   **Resuelto (volumen persistente)**: modelos de usuario y de cursor en `ML_USER_MODELS_DIR`
+   (Disco de Render en `/data/user_models`); modelos del dataset en la imagen. Ver §5.7. Para
+   escalar a varias réplicas haría falta almacenamiento de objetos (fase futura).
+4. ~~Secretos por variable de entorno (`APP_JWT_SECRET`, `DJANGO_SECRET_KEY`) en despliegue.~~
+   **Resuelto (Django)**: con `DEBUG=False` el arranque falla si falta `DJANGO_SECRET_KEY`.
+   El backend (`APP_JWT_SECRET`) debe configurarse explícitamente en producción, pero todavía
+   tiene un valor por defecto de desarrollo en `application.yml` (endurecer pendiente).
+5. ~~Pruebas automatizadas de los endpoints y del servicio ML.~~
+   **Resuelto parcialmente**: 35 pruebas Python + 4 en Java cubren servicio ML, métricas, cursor,
+   persistencia y endpoints. Queda ampliar cobertura de casos límite.
 6. **Contraseña fija**: el sistema usa la contraseña del dataset (`.tie5Roanl`) porque las features
    CMU se definieron sobre esa secuencia. Usar una contraseña arbitraria requeriría recalcular el
    esquema de features.
+
+---
+
+## Referencias
+
+- Killourhy, K. S., & Maxion, R. A. (2009). *Comparing Anomaly-Detection Algorithms for Keystroke
+  Dynamics*. IEEE/IFIP DSN, 125–134. — Dataset **CMU DSL-StrongPasswordData**.
+- Monrose, F., & Rubin, A. D. (2000). *Keystroke Dynamics as a Biometric for Authentication*.
+  Future Generation Computer Systems, 16(4), 351–359.
+- Liu, F. T., Ting, K. M., & Zhou, Z.-H. (2008). *Isolation Forest*. IEEE ICDM, 413–422.
+- Liu, F. T., Ting, K. M., & Zhou, Z.-H. (2012). *Isolation-Based Anomaly Detection*. ACM TKDD, 6(1).
+- Chandola, V., Banerjee, A., & Kumar, V. (2009). *Anomaly Detection: A Survey*. ACM Computing
+  Surveys, 41(3), 1–58.
+- Bolle, R. M., et al. (2013). *Guide to Biometrics*. Springer. — FAR/FRR/EER.
+- Fawcett, T. (2006). *An Introduction to ROC Analysis*. Pattern Recognition Letters, 27(8), 861–874.
+- Pedregosa, F., et al. (2011). *Scikit-learn: Machine Learning in Python*. JMLR, 12, 2825–2830.
 
 ---
 

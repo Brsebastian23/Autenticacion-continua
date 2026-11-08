@@ -310,10 +310,10 @@ code {
   color: var(--bad);
 }
 
-/* Selector de modo (dos opciones) */
+/* Selector de modo (varias opciones, adaptable al ancho) */
 .mode-selector {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -381,5 +381,90 @@ code {
 .alert.info {
   background: rgba(91, 140, 255, 0.12);
   border-color: rgba(91, 140, 255, 0.4);
+  color: #a9c1ff;
+}
+
+/* Panel EER del dashboard de rendimiento */
+.eer-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, rgba(52, 211, 153, 0.14), rgba(91, 140, 255, 0.1));
+  border: 1px solid rgba(52, 211, 153, 0.35);
+  border-radius: var(--radius);
+  padding: 22px 16px;
+  margin: 18px 0;
+}
+
+.eer-hero-label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+
+.eer-hero-value {
+  font-size: 2.6rem;
+  font-weight: 800;
+  color: var(--ok);
+  line-height: 1.1;
+}
+
+.eer-hero-sub {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.curve-chart {
+  width: 100%;
+  height: auto;
+}
+
+/* Zona interactiva de captura de cursor */
+.cursor-zone {
+  position: relative;
+  height: 260px;
+  margin: 16px 0;
+  border: 2px dashed rgba(91, 140, 255, 0.5);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(91, 140, 255, 0.08), transparent 60%),
+    radial-gradient(circle at 70% 70%, rgba(52, 211, 153, 0.08), transparent 60%);
+  cursor: crosshair;
+  user-select: none;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cursor-zone-inner {
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.cursor-zone-inner p {
+  margin: 0 0 4px;
+  font-weight: 600;
+  color: var(--text, #e8ecf7);
+}
+
+.cursor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.features-json {
+  background: #0d1220;
+  border: 1px solid #2c3355;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 0.78rem;
+  overflow-x: auto;
   color: #a9c1ff;
 }

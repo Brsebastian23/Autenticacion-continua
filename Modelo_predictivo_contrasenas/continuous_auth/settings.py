@@ -31,14 +31,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-z-402#m+7zg9&b-#ne456xop0x9@*eh(y8h-ux&+mlmpg8$ofx',
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() == 'true'
+
+# SECURITY WARNING: keep the secret key used in production secret!
+# En desarrollo se permite una clave insegura por comodidad. En producción
+# (DEBUG=False) es OBLIGATORIO definir DJANGO_SECRET_KEY: si falta, se aborta
+# el arranque en lugar de correr con una clave conocida.
+_DEFAULT_INSECURE_KEY = 'django-insecure-z-402#m+7zg9&b-#ne456xop0x9@*eh(y8h-ux&+mlmpg8$ofx'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', _DEFAULT_INSECURE_KEY)
+if not DEBUG and SECRET_KEY == _DEFAULT_INSECURE_KEY:
+    raise RuntimeError(
+        'DJANGO_SECRET_KEY no está definido y DEBUG=False. '
+        'Define DJANGO_SECRET_KEY con un valor secreto en producción.'
+    )
 
 # Hosts permitidos, configurables por variable de entorno (lista separada por comas).
 # En despliegue (Fly.io) añadir el dominio de la app, p. ej. ".fly.dev".
@@ -175,7 +181,18 @@ MAILERS = {
 
 # --- Machine Learning -------------------------------------------------------
 # Directorio donde se persisten los modelos IsolationForest entrenados por usuario.
+# Por defecto: carpeta local del proyecto. En despliegue con volumen persistente
+# (Render Disk) se apunta a la ruta montada, p. ej. /data/user_models.
 ML_MODELS_DIR = Path(os.environ.get('ML_MODELS_DIR', BASE_DIR / 'ml_models'))
+
+# Directorio de los modelos PROPIOS de usuario (mutable, debe persistir).
+# - Local / tests: por defecto igual a ML_MODELS_DIR (comportamiento idéntico).
+# - Producción con volumen: ML_USER_MODELS_DIR=/data/user_models.
+# Los modelos del DATASET (sXXX, inmutables) siguen viviendo en ML_MODELS_DIR,
+# empaquetados en la imagen, y NO se persisten en el volumen.
+ML_USER_MODELS_DIR = Path(
+    os.environ.get('ML_USER_MODELS_DIR', str(ML_MODELS_DIR))
+)
 
 # Dataset de pruebas CMU (DSL-StrongPasswordData.csv).
 DATASET_PATH = Path(
@@ -183,10 +200,21 @@ DATASET_PATH = Path(
 )
 
 # Umbral de decisión: decision_function >= ML_DECISION_THRESHOLD => legítimo.
-# Ajustado con split por sesión (train 1-6, test 7-8, 51 sujetos): con 0.00 se
-# obtiene FAR ~27% y FRR ~9%. Se prioriza minimizar FRR (no rechazar usuarios
-# reales); subir el umbral endurece (menos FAR, más FRR).
-ML_DECISION_THRESHOLD = float(os.environ.get('ML_DECISION_THRESHOLD', '0.0'))
+#
+# Calibrado con el split por sesión (train 1-6, test 7-8, 51 sujetos):
+#   - Umbral 0.0 (línea base del algoritmo): FAR ~27.8 %, FRR ~6.0 %, ACC ~72.6 %.
+#   - Umbral óptimo +0.021328 (minimiza |FAR - FRR|): FAR ~16.3 %, FRR ~11.1 %,
+#     ACC ~83.8 %. El EER (12.19 %) es invariante al umbral por definición.
+# Se adopta el óptimo como valor por defecto para producción; sigue siendo
+# configurable por entorno para ajustar la política de riesgo FAR vs FRR.
+ML_DECISION_THRESHOLD = float(os.environ.get('ML_DECISION_THRESHOLD', '0.021328'))
+
+# Umbral de decisión específico para el modelo de cursor (mouse dynamics).
+# Si no se define, hereda el umbral de tecleo. Permite calibrar el cursor por
+# separado sin afectar el flujo de keystroke existente.
+ML_CURSOR_DECISION_THRESHOLD = float(
+    os.environ.get('ML_CURSOR_DECISION_THRESHOLD', str(ML_DECISION_THRESHOLD))
+)
 
 
 # --- Django REST Framework --------------------------------------------------

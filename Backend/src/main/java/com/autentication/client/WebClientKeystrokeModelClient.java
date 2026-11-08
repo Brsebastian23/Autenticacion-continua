@@ -30,6 +30,10 @@ public class WebClientKeystrokeModelClient implements KeystrokeModelClient {
     private final WebClient webClient;
     private final String predictPath;
     private final String retrainPath;
+    private final String metricsSummaryPath;
+    private final String metricsCurvePath;
+    private final String cursorRetrainPath;
+    private final String cursorPredictPath;
     private final long readTimeoutMs;
 
     public WebClientKeystrokeModelClient(
@@ -37,10 +41,18 @@ public class WebClientKeystrokeModelClient implements KeystrokeModelClient {
             @Value("${app.ml.base-url}") String baseUrl,
             @Value("${app.ml.predict-path}") String predictPath,
             @Value("${app.ml.retrain-path}") String retrainPath,
+            @Value("${app.ml.metrics-summary-path:/api/metrics/summary/}") String metricsSummaryPath,
+            @Value("${app.ml.metrics-curve-path:/api/metrics/curve/}") String metricsCurvePath,
+            @Value("${app.ml.cursor-retrain-path:/api/cursor/retrain/}") String cursorRetrainPath,
+            @Value("${app.ml.cursor-predict-path:/api/cursor/predict/}") String cursorPredictPath,
             @Value("${app.ml.read-timeout-ms}") long readTimeoutMs) {
         this.webClient = webClientBuilder.baseUrl(baseUrl).build();
         this.predictPath = predictPath;
         this.retrainPath = retrainPath;
+        this.metricsSummaryPath = metricsSummaryPath;
+        this.metricsCurvePath = metricsCurvePath;
+        this.cursorRetrainPath = cursorRetrainPath;
+        this.cursorPredictPath = cursorPredictPath;
         this.readTimeoutMs = readTimeoutMs;
     }
 
@@ -152,5 +164,95 @@ public class WebClientKeystrokeModelClient implements KeystrokeModelClient {
             @JsonProperty("status_code") String statusCode,
             @JsonProperty("latency_ms") Double latencyMs
     ) {
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> metricsSummary() {
+        return getJson(metricsSummaryPath, "métricas de resumen");
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> metricsCurve() {
+        return getJson(metricsCurvePath, "curva FAR/FRR");
+    }
+
+    @Override
+    public Map<String, Object> cursorRetrain(Map<String, Object> payload) {
+        return postJson(cursorRetrainPath, payload, "entrenamiento de cursor");
+    }
+
+    @Override
+    public Map<String, Object> cursorPredict(Map<String, Object> payload) {
+        return postJson(cursorPredictPath, payload, "inferencia de cursor");
+    }
+
+    /**
+     * POST genérico hacia el microservicio ML que devuelve un mapa JSON.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> postJson(String path, Map<String, Object> payload,
+                                         String description) {
+        try {
+            Map<String, Object> response = webClient.post()
+                    .uri(path)
+                    .bodyValue(payload)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, resp -> resp.bodyToMono(String.class)
+                            .defaultIfEmpty("")
+                            .map(body -> new ModelServiceException(
+                                    "El modelo respondió %s: %s".formatted(resp.statusCode(), body))))
+                    .bodyToMono(Map.class)
+                    .timeout(Duration.ofMillis(readTimeoutMs))
+                    .onErrorMap(ex -> ex instanceof ModelServiceException
+                            ? ex
+                            : new ModelServiceException(
+                                    "No fue posible ejecutar %s: %s".formatted(description,
+                                            ex.getMessage()), ex))
+                    .block();
+            if (response == null) {
+                throw new ModelServiceException("Respuesta vacía en " + description + ".");
+            }
+            return response;
+        } catch (ModelServiceException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ModelServiceException(
+                    "Error inesperado en %s: %s".formatted(description, ex.getMessage()), ex);
+        }
+    }
+
+    /**
+     * GET genérico hacia el microservicio ML que devuelve un mapa JSON.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> getJson(String path, String description) {
+        try {
+            Map<String, Object> response = webClient.get()
+                    .uri(path)
+                    .retrieve()
+                    .onStatus(HttpStatusCode::isError, resp -> resp.bodyToMono(String.class)
+                            .defaultIfEmpty("")
+                            .map(body -> new ModelServiceException(
+                                    "El modelo respondió %s: %s".formatted(resp.statusCode(), body))))
+                    .bodyToMono(Map.class)
+                    .timeout(Duration.ofMillis(readTimeoutMs))
+                    .onErrorMap(ex -> ex instanceof ModelServiceException
+                            ? ex
+                            : new ModelServiceException(
+                                    "No fue posible obtener %s: %s".formatted(description,
+                                            ex.getMessage()), ex))
+                    .block();
+            if (response == null) {
+                throw new ModelServiceException("Respuesta vacía al obtener " + description + ".");
+            }
+            return response;
+        } catch (ModelServiceException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            throw new ModelServiceException(
+                    "Error inesperado obteniendo %s: %s".formatted(description, ex.getMessage()), ex);
+        }
     }
 }

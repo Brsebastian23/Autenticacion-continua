@@ -3,6 +3,8 @@ import { api } from './api/client.js';
 import AuthScreen from './components/AuthScreen.jsx';
 import KeystrokeTester from './components/KeystrokeTester.jsx';
 import TrainingScreen from './components/TrainingScreen.jsx';
+import MetricsDashboard from './components/MetricsDashboard.jsx';
+import CursorScreen from './components/CursorScreen.jsx';
 
 const TOKEN_KEY = 'ca_token';
 const USER_KEY = 'ca_user';
@@ -124,19 +126,38 @@ export default function App() {
                 <span className="mode-title">Entrenar mi modelo</span>
                 <span className="mode-desc">Escribir {10} veces y entrenar</span>
               </button>
+              <button
+                className={screen === 'metrics' ? 'mode-btn active' : 'mode-btn'}
+                onClick={() => setScreen('metrics')}
+              >
+                <span className="mode-title">Rendimiento</span>
+                <span className="mode-desc">EER, FAR/FRR y exactitud</span>
+              </button>
+              <button
+                className={screen === 'cursor' ? 'mode-btn active' : 'mode-btn'}
+                onClick={() => setScreen('cursor')}
+              >
+                <span className="mode-title">Dinámica del cursor</span>
+                <span className="mode-desc">Mouse dynamics</span>
+              </button>
             </nav>
 
-            {screen === 'verify' ? (
+            {screen === 'verify' && (
               <KeystrokeTester
                 token={token}
                 modelId={user?.activeModelId || user?.keystrokeModelId}
               />
-            ) : (
+            )}
+            {screen === 'train' && (
               <TrainingScreen
                 token={token}
                 modelId={user?.keystrokeModelId}
                 onTrained={refreshUser}
               />
+            )}
+            {screen === 'metrics' && <MetricsDashboard />}
+            {screen === 'cursor' && (
+              <CursorScreen userId={user?.keystrokeModelId || user?.username || 'demo'} />
             )}
           </>
         )}

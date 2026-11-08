@@ -40,6 +40,10 @@ app:
     base-url: ${ML_BASE_URL:http://127.0.0.1:8000}
     predict-path: ${ML_PREDICT_PATH:/api/predict/}
     retrain-path: ${ML_RETRAIN_PATH:/api/retrain/}
+    metrics-summary-path: ${ML_METRICS_SUMMARY_PATH:/api/metrics/summary/}
+    metrics-curve-path: ${ML_METRICS_CURVE_PATH:/api/metrics/curve/}
+    cursor-retrain-path: ${ML_CURSOR_RETRAIN_PATH:/api/cursor/retrain/}
+    cursor-predict-path: ${ML_CURSOR_PREDICT_PATH:/api/cursor/predict/}
     connect-timeout-ms: ${ML_CONNECT_TIMEOUT_MS:3000}
     read-timeout-ms: ${ML_READ_TIMEOUT_MS:10000}
 

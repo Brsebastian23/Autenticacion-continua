@@ -64,4 +64,21 @@ export const api = {
       token,
       body: { samples },
     }),
+
+  // Métricas de exactitud (EER/FAR/FRR/AUC). El backend hace de fachada hacia
+  // el microservicio ML, así el front siempre habla un único origen.
+  metricsSummary: () => request('/metrics/summary'),
+  metricsCurve: () => request('/metrics/curve'),
+
+  // Dinámica del cursor (mouse dynamics). Fachada al microservicio ML.
+  cursorRetrain: ({ userId, records, synthetic, n }) =>
+    request('/cursor/retrain', {
+      method: 'POST',
+      body: { user_id: userId, records, synthetic, n },
+    }),
+  cursorPredict: ({ userId, record }) =>
+    request('/cursor/predict', {
+      method: 'POST',
+      body: { user_id: userId, record },
+    }),
 };

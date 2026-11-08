@@ -53,10 +53,36 @@ def _safe_filename(user_id: str) -> str:
     return re.sub(r'[^A-Za-z0-9_.-]', '_', str(user_id))
 
 
-def model_path_for(user_id: str) -> Path:
-    models_dir = Path(settings.ML_MODELS_DIR)
+def is_user_model(user_id: str) -> bool:
+    """¿El id corresponde a un modelo PROPIO de usuario?
+
+    Los modelos del dataset CMU se identifican como ``s002`` (sujeto + número).
+    Los modelos entrenados por usuarios reales los crea el backend como
+    ``user-<username>``. Solo los de usuario son mutables y, por tanto, deben
+    persistirse en el volumen.
+    """
+    return str(user_id).startswith('user-')
+
+
+def _models_dir_for(user_id: str) -> Path:
+    """Devuelve el directorio donde debe vivir el modelo de ``user_id``.
+
+    - Modelos de usuario (``user-*``) -> ``ML_USER_MODELS_DIR`` (persistente).
+    - Modelos del dataset (``sXXX``)  -> ``ML_MODELS_DIR`` (en la imagen).
+
+    Si no existe ``ML_USER_MODELS_DIR`` en settings (p. ej. tests antiguos),
+    se cae a ``ML_MODELS_DIR`` para no romper compatibilidad.
+    """
+    if is_user_model(user_id):
+        models_dir = Path(getattr(settings, 'ML_USER_MODELS_DIR', settings.ML_MODELS_DIR))
+    else:
+        models_dir = Path(settings.ML_MODELS_DIR)
     models_dir.mkdir(parents=True, exist_ok=True)
-    return models_dir / f'iforest_{_safe_filename(user_id)}.joblib'
+    return models_dir
+
+
+def model_path_for(user_id: str) -> Path:
+    return _models_dir_for(user_id) / f'iforest_{_safe_filename(user_id)}.joblib'
 
 
 def record_to_vector(record: dict) -> np.ndarray:

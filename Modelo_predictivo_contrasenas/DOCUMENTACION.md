@@ -473,6 +473,13 @@ Comando `evaluate_models` que compara datos vistos (train) vs no vistos (test) y
 | `authentication_api/migrations/0001_initial.py` | Esquema de BD. |
 | `authentication_api/management/commands/train_from_csv.py` | Importación y entrenamiento desde CSV. |
 | `authentication_api/management/commands/evaluate_models.py` | Evaluación FAR/FRR/EER/AUC. |
+| `authentication_api/management/commands/benchmark_report.py` | Genera `docs/REPORTE_EER.md` y `docs/benchmark_eer.json` (EER persistido). |
+| `authentication_api/metrics.py` | Métricas reutilizables (FAR, FRR, EER, AUC, resumen). |
+| `docs/REPORTE_EER.md` | Reporte formal de exactitud con respuesta a la pregunta de investigación. |
+| `docs/benchmark_eer.json` | Datos crudos del benchmark (fuente de `/api/metrics/*`). |
+| `docs/DISENO_CONTRASENA_ARBITRARIA.md` | Diseño (no implementado) para contraseña arbitraria. |
+| `authentication_api/cursor_service.py` | Features de cursor, generador sintético y modelo de mouse dynamics. |
+| `continuous_auth/test_settings.py` | Settings de test aislados (SQLite en memoria). |
 | `manage.py` | Punto de entrada de Django. |
 | `requirements.txt` | Dependencias. |
 | `Dockerfile` / `docker-entrypoint.sh` / `build.sh` | Despliegue. |
@@ -495,15 +502,186 @@ Comando `evaluate_models` que compara datos vistos (train) vs no vistos (test) y
 
 ## 8. Métricas de referencia
 
-Configuración por defecto (split por sesión: train 1–6, test 7–8, 51 sujetos) y
-`ML_DECISION_THRESHOLD = 0.0`:
+Configuración del benchmark (split por sesión: train 1–6, test 7–8, 51 sujetos).
+El umbral **por defecto en producción** es el óptimo calibrado
+`ML_DECISION_THRESHOLD = 0.021328`; el valor `0.0` (frontera natural del
+algoritmo) se conserva como **línea base** de comparación:
 
-- **FAR ≈ 27 %** (impostores aceptados).
-- **FRR ≈ 9 %** (genuinos rechazados).
+| Umbral | FAR | FRR | Accuracy |
+|---|---|---|---|
+| **0.0 (línea base)** | ≈ 27.8 % | ≈ 6.0 % | ≈ 72.6 % |
+| **+0.021328 (por defecto, óptimo)** | ≈ 16.3 % | ≈ 11.1 % | ≈ 83.8 % |
 
-Criterio de ajuste documentado en `settings.py`: se prioriza minimizar el **FRR** (no rechazar
-usuarios reales); subir el umbral reduce FAR a costa de aumentar FRR. Las métricas definitivas
-deben obtenerse con `python manage.py evaluate_models`.
+El umbral es configurable por entorno (`ML_DECISION_THRESHOLD`) para ajustar la
+política de riesgo: subirlo reduce FAR a costa de aumentar FRR, y viceversa. Las
+métricas definitivas deben obtenerse con `python manage.py evaluate_models` o
+`python manage.py benchmark_report`.
+
+### 8.1. Respuesta a la pregunta de investigación: EER
+
+El proyecto se pregunta **qué EER (Equal Error Rate) alcanza el modelo para distinguir al
+usuario legítimo de un impostor**. Ese indicador se materializa ahora en un reporte persistente y
+consultable, no solo en la salida de consola:
+
+| Resultado del benchmark (51 sujetos, split por sesión) | Valor |
+|---|---|
+| **EER medio** | **12.19 %** |
+| EER mediana | 11.00 % |
+| EER min / max | 1.00 % / 35.22 % |
+| EER desviación | 7.58 % |
+| **AUC-ROC medio** | **93.85 %** |
+| FAR @ umbral 0.0 | 27.79 % |
+| FRR @ umbral 0.0 | 6.04 % |
+| Accuracy @ umbral 0.0 | 72.64 % |
+| **Umbral óptimo recomendado** | **+0.021328** |
+
+Con el umbral óptimo (que minimiza |FAR − FRR|), las métricas a umbral 0.0 mejoran notablemente:
+FAR **27.8 % → 16.3 %**, FRR 6.0 % → 11.1 %, accuracy **72.6 % → 83.8 %**, manteniendo el EER en
+12.19 % (el EER es invariante al umbral por definición).
+
+**Interpretación:** un EER de ~12 % implica que, en el punto de equilibrio, el sistema falla
+aproximadamente 1 de cada 8 decisiones, repartiendo el error por igual entre legítimos rechazados
+e impostores aceptados. El AUC de ~94 % confirma una alta separación de clases; el error se
+concentra en la zona de solapamiento de scores, no en una confusión global.
+
+### 8.2. Cómo reproducir y consultar el EER
+
+```bash
+# 1. Genera docs/REPORTE_EER.md y docs/benchmark_eer.json (tabla por sujeto incluida)
+python manage.py benchmark_report --per-subject
+
+# 2. Consulta el agregado por API
+curl http://localhost:8000/api/metrics/summary/
+curl http://localhost:8000/api/metrics/curve/
+```
+
+- **`docs/REPORTE_EER.md`** — reporte legible con la respuesta a la pregunta de investigación,
+  tablas agregadas y detalle por sujeto.
+- **`docs/benchmark_eer.json`** — datos crudos que consume la API y el frontend.
+- **Pantalla «Rendimiento»** del frontend — muestra el EER, AUC, FAR/FRR y la curva FAR vs FRR
+  con el punto de equilibrio resaltado.
+
+Los endpoints `/api/metrics/summary/` y `/api/metrics/curve/` del microservicio ML se exponen a
+través del backend Spring (`/api/metrics/summary/`, `/api/metrics/curve/`), que actúa de fachada
+para que el frontend hable un único origen (compatible con el despliegue en Render).
+
+---
+
+## 8.3. Dinámica del cursor (mouse dynamics)
+
+Como complemento al tecleo, el sistema incluye un conjunto **paralelo e
+independiente** de features basadas en el movimiento y los clics del cursor.
+Está diseñado de forma **totalmente aditiva**: no modifica el esquema de tecleo
+(31 features CMU) ni sus modelos; conviven sin interferencias.
+
+### 8.3.1. Features (12)
+
+Genéricas e independientes de la resolución:
+
+| Feature | Descripción |
+|---|---|
+| `M.speed_mean` | velocidad media (px/ms) |
+| `M.speed_std` | desviación de la velocidad |
+| `M.speed_max` | velocidad máxima |
+| `M.accel_mean` | aceleración media (variación de velocidad) |
+| `M.jitter` | variación de la dirección (ruido del pulso) |
+| `M.curvature_mean` | curvatura media de la trayectoria |
+| `M.straightness` | 1.0 = línea recta perfecta |
+| `M.pause_ratio` | fracción de tiempo sin movimiento |
+| `M.pause_count` | nº de pausas (> 100 ms sin movimiento) |
+| `M.click_rate` | clics por segundo |
+| `M.interclick_mean` | tiempo medio entre clics (ms) |
+| `M.path_efficiency` | distancia neta / distancia recorrida |
+
+### 8.3.2. Generador sintético
+
+Antes de contar con captura real masiva, `cursor_service.generate_synthetic_cursor_records`
+produce muestras **reproducibles** por usuario. Cada `user_id` recibe un perfil
+estable (`precise`, `fast`, `erratic`, `slow`) derivado de un hash determinista;
+sobre ese perfil se añade ruido gaussiano proporcional para simular la
+variabilidad natural entre repeticiones. Con la misma semilla, la salida es
+idéntica. Cuando exista captura real, `train_cursor_model` acepta esos `records`
+directamente sin cambios en el esquema.
+
+### 8.3.3. Modelo y umbral
+
+- Algoritmo: `IsolationForest` (mismos hiperparámetros que el de tecleo).
+- Modelo persistido como `ml_models/cursor_iforest_<user>.joblib` (prefijo
+  distinto al de tecleo para no colisionar).
+- Umbral propio `ML_CURSOR_DECISION_THRESHOLD` (por defecto hereda
+  `ML_DECISION_THRESHOLD`), de modo que calibrar el cursor no afecta al tecleo.
+
+### 8.3.4. Endpoints
+
+| Método | Ruta (ML) | Ruta (backend) | Descripción |
+|---|---|---|---|
+| `POST` | `/api/cursor/retrain/` | `/api/cursor/retrain/` | Entrena con `records` reales o `synthetic:true` |
+| `POST` | `/api/cursor/predict/` | `/api/cursor/predict/` | Verifica una sesión de cursor |
+| `GET` | `/api/cursor/synthetic/` | (directo al ML) | Dataset sintético reproducible |
+
+### 8.3.5. Interfaz
+
+La pestaña **«Dinámica del cursor»** del frontend ofrece una zona interactiva:
+el usuario mueve el cursor y hace clic; cada ráfaga es una *sesión* con sus 12
+features. Tras acumular sesiones puede (a) entrenar con sus datos reales, (b)
+entrenar con datos sintéticos para demos, y (c) verificar una nueva sesión
+contra el modelo.
+
+### 8.3.6. Pruebas
+
+- Python: `CursorSyntheticTests`, `CursorModelTests`, `CursorEndpointsTests`
+  (10 casos) — generador, cotas físicas, entrenamiento, separación
+  legítimo/impostor y endpoints.
+- Java: `CursorControllerTest` (2 casos) — la fachada reenvía al modelo.
+
+---
+
+## 8.4. Persistencia de modelos en producción
+
+Los modelos ``.joblib`` viven en disco. En local eso es suficiente, pero en un
+contenedor el filesystem es **efímero**: cada redeploy o reinicio borraría los
+modelos de usuario. La solución adoptada **separa dos tipos de modelo**:
+
+| Tipo | Identificador | Dónde vive | ¿Persiste? |
+|---|---|---|---|
+| **Dataset** | ``s002`` … (CMU) | ``ML_MODELS_DIR`` (en la imagen) | No hace falta: es inmutable y va empaquetado. |
+| **Usuario** | ``user-<username>`` | ``ML_USER_MODELS_DIR`` (volumen) | **Sí**, en el Disco de Render. |
+| **Cursor** | siempre de usuario | ``ML_USER_MODELS_DIR`` (volumen) | **Sí**. |
+
+La distinción se resuelve en un único punto, ``ml_service.model_path_for``:
+si el id empieza por ``user-`` va al directorio persistente; si no, al del
+dataset. Esto mantiene intacto el flujo de tecleo y evita re-entrenar los 51
+modelos del dataset en cada arranque.
+
+### Configuración
+
+- **Local / tests:** no se define ``ML_USER_MODELS_DIR`` → por defecto es igual a
+  ``ML_MODELS_DIR``. Comportamiento **idéntico** al anterior, nada cambia.
+- **Producción (Render):** se monta un Disco en ``/data`` y se define
+  ``ML_USER_MODELS_DIR=/data/user_models``. El ``docker-entrypoint.sh`` crea la
+  subcarpeta al arrancar.
+
+### Despliegue en Render (pasos)
+
+1. Crear un **Disk** (Web Service → Disks): nombre ``user-models``, mount path
+   ``/data``, 1 GB.
+2. Variable de entorno ``ML_USER_MODELS_DIR=/data/user_models``.
+3. (Opcional) usar el ``render.yaml`` incluido, que ya declara disco + variable.
+
+### Limitación y fase siguiente
+
+Un Render Disk va atado a **una sola instancia** (``numInstances=1``). Para
+escalar horizontalmente a varias réplicas hace falta un almacenamiento
+compartido (S3 / Cloudflare R2 / Supabase Storage) con caché local. Está
+previsto como evolución; la abstracción de rutas ya deja el punto de
+integración localizado en ``model_path_for``/``cursor_model_path_for``.
+
+### Pruebas
+
+``ModelStorageSeparationTests`` (6 casos) verifica que ``sXXX`` va a
+``ML_MODELS_DIR``, ``user-*`` y los modelos de cursor van a
+``ML_USER_MODELS_DIR``, y que sin el setting todo cae a ``ML_MODELS_DIR``
+(compatibilidad).
 
 ---
 
@@ -513,15 +691,27 @@ deben obtenerse con `python manage.py evaluate_models`.
 evaluación y contenerización.
 
 **Pendiente / mejoras:**
-1. Calibración formal del umbral (curva FAR vs FRR / EER) y fijarlo en producción.
+1. ~~Calibración formal del umbral (curva FAR vs FRR / EER) y fijarlo en producción.~~
+   **Resuelto**: `benchmark_report` calcula el umbral óptimo (+0.021328) y el EER (12.19 %);
+   ver §8.1. Fijado como valor por defecto de `ML_DECISION_THRESHOLD` (0.0 conservado como
+   línea base documentada).
 2. **Endurecer la verificación frente a impostores "promedio".** IsolationForest es permisivo con
    patrones raros pero globalmente normales (ver §4.6.7). Evaluar un enfoque híbrido que combine el
    detector de anomalías con un clasificador supervisado entrenado usando las muestras de otros
    sujetos como pseudo-impostores. Es una decisión de producto, no solo técnica.
-3. Persistencia de modelos en producción más allá del sistema de ficheros del contenedor
-   (volumen persistente u objeto externo), ya que el filesystem puede ser efímero.
-4. `SECRET_KEY` y demás secretos por variable de entorno en despliegue.
-5. Pruebas automatizadas (`tests.py`) de los endpoints y del servicio ML.
+3. ~~Persistencia de modelos en producción más allá del sistema de ficheros del contenedor
+   (volumen persistente u objeto externo), ya que el filesystem puede ser efímero.~~
+   **Resuelto (volumen persistente)**: los modelos de usuario (``user-*`` y de cursor) se
+   guardan en ``ML_USER_MODELS_DIR``, que en despliegue apunta a un Disco de Render
+   (``/data/user_models``). Los modelos del dataset (``sXXX``) permanecen en la imagen.
+   Ver §8.4. Para escalar a varias réplicas habría que migrar a almacenamiento de objetos.
+4. ~~`SECRET_KEY` y demás secretos por variable de entorno en despliegue.~~
+   **Resuelto**: con `DEBUG=False`, si `DJANGO_SECRET_KEY` no está definido el arranque
+   **falla** explícitamente (en vez de usar la clave insegura por defecto). En local
+   (`DEBUG=True`) se mantiene la clave de desarrollo para comodidad.
+5. ~~Pruebas automatizadas (`tests.py`) de los endpoints y del servicio ML.~~
+   **Resuelto parcialmente**: `tests.py` cubre el servicio ML, métricas, cursor y
+   endpoints (29 pruebas Python; más 4 en Java). Queda ampliar cobertura de casos límite.
 
 ---
 
@@ -539,3 +729,51 @@ limpiamente:
 Esta separación permite evaluar, reentrenar y desplegar el modelo de forma independiente del
 resto de la plataforma, cumpliendo los requisitos funcionales y no funcionales definidos durante
 el análisis.
+
+---
+
+## 11. Referencias
+
+**Dataset y dinámica de tecleo**
+
+1. Killourhy, K. S., & Maxion, R. A. (2009). *Comparing Anomaly-Detection Algorithms for
+   Keystroke Dynamics*. IEEE/IFIP International Conference on Dependable Systems & Networks
+   (DSN), 125–134. — Origen del dataset **CMU DSL-StrongPasswordData** y del benchmark de
+   algoritmos de detección de anomalías para tecleo.
+2. CMU Data Set for Keystroke Dynamics. Carnegie Mellon University, School of Computer Science.
+   `https://www.cs.cmu.edu/~keystroke/`.
+3. Monrose, F., & Rubin, A. D. (2000). *Keystroke Dynamics as a Biometric for Authentication*.
+   Future Generation Computer Systems, 16(4), 351–359. — Fundamentos de la biometría de tecleo y
+   sus tipos de features (hold time, latencias).
+
+**Detección de anomalías**
+
+4. Liu, F. T., Ting, K. M., & Zhou, Z.-H. (2008). *Isolation Forest*. IEEE International
+   Conference on Data Mining (ICDM), 413–422. — Algoritmo base del sistema.
+5. Liu, F. T., Ting, K. M., & Zhou, Z.-H. (2012). *Isolation-Based Anomaly Detection*. ACM
+   Transactions on Knowledge Discovery from Data (TKDD), 6(1), 1–39. — Extensión y análisis
+   del método.
+6. Chandola, V., Banerjee, A., & Kumar, V. (2009). *Anomaly Detection: A Survey*. ACM Computing
+   Surveys, 41(3), 1–58. — Marco general de detección de anomalías (una clase, aprendizaje no
+   supervisado).
+
+**Métricas biométricas**
+
+7. Bolle, R. M., Connell, J. H., Pankanti, S., Ratha, N. K., & Senior, A. W. (2013). *Guide to
+   Biometrics*. Springer. — Definición de FAR, FRR, EER y AUC-ROC.
+8. Fawcett, T. (2006). *An Introduction to ROC Analysis*. Pattern Recognition Letters, 27(8),
+   861–874. — Curva ROC y AUC.
+
+**Tecnologías**
+
+9. Pedregosa, F., et al. (2011). *Scikit-learn: Machine Learning in Python*. Journal of Machine
+   Learning Research (JMLR), 12, 2825–2830.
+10. Django Software Foundation. *Django Documentation* — `https://docs.djangoproject.com/`.
+11. Django REST Framework — `https://www.django-rest-framework.org/`.
+12. Spring Boot Reference Documentation — `https://docs.spring.io/spring-boot/`.
+13. React Documentation — `https://react.dev/`.
+
+**Herramienta de análisis**
+
+14. Google NotebookLM — `https://notebooklm.google.com/` — empleado en la fase de análisis de
+    dominio y síntesis de requisitos (§2).

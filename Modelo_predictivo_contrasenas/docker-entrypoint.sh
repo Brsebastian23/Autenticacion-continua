@@ -1,6 +1,19 @@
 #!/usr/bin/env sh
 set -e
 
+# Directorio de modelos de USUARIO (persistente vía volumen). Si ML_USER_MODELS_DIR
+# apunta a un disco montado (p. ej. /data/user_models), nos aseguramos de que la
+# subcarpeta exista antes de nada.
+python - <<'PY'
+import os, django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "continuous_auth.settings")
+django.setup()
+from pathlib import Path
+from django.conf import settings
+Path(settings.ML_USER_MODELS_DIR).mkdir(parents=True, exist_ok=True)
+print(f"Modelos de usuario en: {settings.ML_USER_MODELS_DIR}")
+PY
+
 # Aplicar migraciones (crea tablas en el esquema ml de Supabase).
 python manage.py migrate --noinput
 
@@ -29,6 +42,16 @@ if missing:
 else:
     print("Seed: todos los modelos del dataset ya están presentes. No se entrena.")
 PY
+
+# Benchmark de exactitud (EER/FAR/FRR/AUC): genera docs/benchmark_eer.json que
+# sirve /api/metrics/summary/. Solo se ejecuta si el archivo no existe (el
+# reporte se versiona y se regenera manualmente cuando cambian los modelos).
+if [ ! -f docs/benchmark_eer.json ]; then
+    echo "Benchmark: generando docs/benchmark_eer.json..."
+    python manage.py benchmark_report || echo "Aviso: no se pudo generar el benchmark."
+else
+    echo "Benchmark: docs/benchmark_eer.json ya existe. No se regenera."
+fi
 
 # Servidor de producción
 exec gunicorn continuous_auth.wsgi:application \
