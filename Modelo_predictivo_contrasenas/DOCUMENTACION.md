@@ -115,6 +115,7 @@ se realizaron con **NotebookLM**. Las fuentes cargadas en el cuaderno fueron:
                                           │ (Isolation   │ ───────────────► │  modelo por user │  │  PostgreSQL)   │
                                           │  Forest)     │                  └─────────────────┘   │ Auditoría       │
                                           └──────────────┘                                         └────────────────┘
+                                          
 ```
 
 ### 4.2. Diseño del pipeline de ML

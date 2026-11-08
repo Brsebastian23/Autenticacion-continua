@@ -1,5 +1,10 @@
 # Render Blueprint — Microservicio ML (Django) con Docker + Disco persistente.
 #
+# ⚠️  NOTA: este archivo despliega SOLO el ML y asume plan de pago (Starter) porque
+#     usa un Disco persistente. Para el despliegue COMPLETO (front + backend + ML +
+#     PostgreSQL) y en plan GRATUITO, usa el `render.yaml` de la RAÍZ del repositorio.
+#     Ver docs/DESPLIEGUE_RENDER.md.
+#
 # Por qué Docker: el Dockerfile define el ENTRYPOINT (docker-entrypoint.sh) que
 # crea el volumen, aplica migraciones, hace seed de modelos y el benchmark. Con
 # `runtime: python` ese entrypoint NO se ejecuta; con Docker sí.

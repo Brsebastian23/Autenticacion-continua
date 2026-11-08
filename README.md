@@ -1,20 +1,23 @@
-# Autenticación Continua por Dinámica de Teclado (Keystroke Dynamics)
+# Autenticación Continua por Dinámica de Teclado y Cursor (Keystroke + Mouse Dynamics)
 
 Sistema de autenticación que no solo verifica **qué** contraseña se escribe, sino **cómo** se
-escribe. A partir de los tiempos de tecleo de un usuario, un modelo de *machine learning* decide si
-la persona que está en el teclado es realmente quien dice ser o un impostor.
+escribe y **cómo** se mueve el cursor. A partir de la dinámica de tecleo (31 features) y de la
+dinámica del cursor (12 features), modelos de *machine learning* (`IsolationForest`, uno por
+usuario y por modalidad) deciden si la persona que está frente al equipo es realmente quien dice
+ser o un impostor.
 
 Este repositorio implementa el sistema completo en tres piezas independientes:
 
 | Componente | Tecnología | Rol |
 |---|---|---|
-| **Front/** | React + Vite | Captura los tiempos de tecleo en el navegador y calcula las 31 features. |
-| **Backend/** | Spring Boot (Java 17) | Autenticación con contraseña, usuarios, JWT y orquestación con el modelo. |
-| **Modelo_predictivo_contrasenas/** | Django + DRF + scikit-learn | Microservicio de ML: entrena y evalúa los modelos IsolationForest. |
+| **Front/** | React + Vite | Captura los tiempos de tecleo y el movimiento del cursor; calcula las features. |
+| **Backend/** | Spring Boot (Java 17) | Autenticación con contraseña, usuarios, JWT y orquestación con los modelos. |
+| **Modelo_predictivo_contrasenas/** | Django + DRF + scikit-learn | Microservicio de ML: entrena, evalúa y audita los modelos IsolationForest (tecleo y cursor). |
 
 > Este README documenta **todo** el sistema: por qué existe, para qué sirve, cómo fluye una
-> petición de principio a fin y, en detalle, **cómo se calculan las anomalías** que deciden si una
-> muestra es legítima o un impostor.
+> petición de principio a fin, **cómo se calculan las anomalías** y **cómo se mide su exactitud
+> (EER/FAR/FRR/AUC)**. Los documentos de `Modelo_predictivo_contrasenas/docs/` profundizan en
+> despliegue, perspectivas éticas/sociales y la evaluación por criterios.
 
 ---
 
@@ -23,10 +26,10 @@ Este repositorio implementa el sistema completo en tres piezas independientes:
 1. [¿Por qué y para qué existe este sistema?](#1-por-qué-y-para-qué-existe-este-sistema)
 2. [Concepto: dinámica de teclado](#2-concepto-dinámica-de-teclado)
 3. [Arquitectura general](#3-arquitectura-general)
-4. [Las 31 features: cómo se calculan](#4-las-31-features-cómo-se-calculan)
+4. [Las 31 features de tecleo: cómo se calculan](#4-las-31-features-de-tecleo-cómo-se-calculan)
 5. [Cómo se calculan las anomalías (el núcleo)](#5-cómo-se-calculan-las-anomalías-el-núcleo)
 6. [Flujo completo de usuario y de datos](#6-flujo-completo-de-usuario-y-de-datos)
-7. [Frontend: captura de tecleo](#7-frontend-captura-de-tecleo)
+7. [Frontend: captura de tecleo y cursor](#7-frontend-captura-de-tecleo-y-cursor)
 8. [Backend: autenticación y orquestación](#8-backend-autenticación-y-orquestación)
 9. [Microservicio de ML: entrenamiento, inferencia y auditoría](#9-microservicio-de-ml-entrenamiento-inferencia-y-auditoría)
 10. [Métricas de evaluación (FAR, FRR, EER, AUC)](#10-métricas-de-evaluación-far-frr-eer-auc)
@@ -34,7 +37,12 @@ Este repositorio implementa el sistema completo en tres piezas independientes:
 12. [Variables de entorno](#12-variables-de-entorno)
 13. [Estructura del repositorio](#13-estructura-del-repositorio)
 14. [Estado actual y limitaciones conocidas](#14-estado-actual-y-limitaciones-conocidas)
-15. [Referencias](#referencias)
+15. [Dinámica del cursor (mouse dynamics)](#15-dinámica-del-cursor-mouse-dynamics)
+16. [Medición de exactitud: benchmark EER](#16-medición-de-exactitud-benchmark-eer)
+17. [Pruebas automatizadas](#17-pruebas-automatizadas)
+18. [Despliegue en Render (guía y correcciones)](#18-despliegue-en-render-guía-y-correcciones)
+19. [Perspectivas éticas, sociales y humanas](#19-perspectivas-éticas-sociales-y-humanas)
+20. [Referencias](#20-referencias)
 
 ---
 
@@ -104,7 +112,7 @@ Enter), lo que produce exactamente las **31 features** que veremos en la §4.
 │                      │                     │                        │               │                              │
 │ • Captura keydown/up │                     │ • /api/auth/*          │               │ • /api/retrain/              │
 │ • Calcula 31 features│                     │ • /api/keystroke/train │               │ • /api/predict/              │
-│ • Muestra resultado  │                     │ • /api/keystroke/verify│               │                              │
+│ • Muestra resultado  │                     │ • /api/keystroke/verify│               │ • /api/cursor/*  • metrics/* │
 └──────────────────────┘                     └───────────┬────────────┘               └──────────────┬───────────────┘
                                                          │                                            │
                                                    ┌─────▼──────┐                        ┌────────────┼────────────┐
@@ -133,7 +141,7 @@ claros y tempranos en lugar de fallos crípticos del servicio Python.
 
 ---
 
-## 4. Las 31 features: cómo se calculan
+## 4. Las 31 features de tecleo: cómo se calculan
 
 Las 31 features se derivan de las 11 teclas de `.tie5Roanl` + Return. Se calculan **en el
 navegador** (`Front/src/services/keystroke.js`) y su *nombre* coincide exactamente con la columna
@@ -376,7 +384,7 @@ dataset es de **solo lectura** y nunca se sobrescribe.
 
 ---
 
-## 7. Frontend: captura de tecleo
+## 7. Frontend: captura de tecleo y cursor
 
 **Stack**: React 18 + Vite. Sin dependencias de ML en el cliente.
 
@@ -664,7 +672,10 @@ Cada componente trae su `Dockerfile`:
 - Verificación y entrenamiento de modelos propios por usuario.
 - Microservicio ML con entrenamiento por usuario, inferencia y auditoría completa.
 - Importación del dataset CMU (51 modelos) y evaluación FAR/FRR/EER/AUC.
-- Contenerización de los tres componentes.
+- **Módulo de dinámica del cursor** (12 features, modelo por usuario, endpoints y UI) — §15.
+- **Benchmark EER** reproducible con endpoint `/api/metrics/*` y pestaña "Rendimiento" — §16.
+- **Pruebas automatizadas** de ML, métricas y cursor — §17.
+- Contenerización de los tres componentes y despliegue en Render — §18.
 
 **Limitaciones y trabajo pendiente:**
 
@@ -689,11 +700,175 @@ Cada componente trae su `Dockerfile`:
    persistencia y endpoints. Queda ampliar cobertura de casos límite.
 6. **Contraseña fija**: el sistema usa la contraseña del dataset (`.tie5Roanl`) porque las features
    CMU se definieron sobre esa secuencia. Usar una contraseña arbitraria requeriría recalcular el
-   esquema de features.
+   esquema de features (ver `docs/DISENO_CONTRASENA_ARBITRARIA.md`).
+7. **Fusión tecleo + cursor**: hoy son modelos separados; combinar sus scores en una sola decisión
+   es una decisión de producto (trabajo futuro, §15.6).
+8. **Validación con tareas reales**: no se han ejecutado estudios con actividades reales de oficina
+   ni pruebas de usabilidad; el protocolo propuesto está en `docs/PERSPECTIVAS_ETICAS_SOCIALES.md`
+   (§19.3.2).
 
 ---
 
-## Referencias
+## 15. Dinámica del cursor (mouse dynamics)
+
+Además del tecleo, el sistema incorpora una segunda modalidad biométrica de comportamiento: la
+**dinámica del cursor** (cómo se mueve y hace clic el ratón). Es independiente del modelo de tecleo
+y se sirve como módulo paralelo en el mismo microservicio ML.
+
+### 15.1. Qué mide y por qué
+Cada persona mueve el ratón con un patrón motor propio: velocidad, aceleración, curvatura de la
+trayectoria, pausas, presión de clic. Un impostor puede conocer la contraseña pero no reproduce el
+estilo de movimiento del titular. El cursor aporta una señal **independiente** del tecleo, lo que
+habilita una autenticación multimodal.
+
+### 15.2. Las 12 features del cursor
+Definidas en `authentication_api/cursor_service.py` (`CURSOR_FEATURE_COLUMNS`) y capturadas en
+`Front/src/services/cursor.js`:
+
+| Familia | Ejemplos | Qué mide |
+|---|---|---|
+| Velocidad | `M.speed_mean`, `M.speed_max` | Ritmo medio/máximo del puntero. |
+| Aceleración | `M.accel_mean` | Cambios de velocidad (brusquedad). |
+| Trayectoria | `M.curvature_mean`, `M.path_efficiency` | Curvatura y eficiencia del recorrido. |
+| Pausas / tiempos | `M.pause_rate`, `M.duration_mean` | Pausas y duración de la sesión. |
+| Clic | `M.click_interval_mean` | Ritmo entre clics. |
+| … | (resto) | … |
+
+Los nombres coinciden 1:1 con el modelo Python, así que no hay traducción en el borde.
+
+### 15.3. Flujo de uso
+Pantalla **"Dinámica del cursor"** (`CursorScreen.jsx`): el usuario mueve el cursor en una zona
+designada y hace clics; la pantalla muestra el número de puntos capturados y, cuando reúne sesiones
+suficientes, permite **entrenar** y **verificar** la sesión actual.
+
+### 15.4. Modelo y entrenamiento
+Mismo enfoque que el tecleo: `IsolationForest` por usuario (`iforest_cursor_<user_id>.joblib`),
+`decision_function` + umbral (`ML_CURSOR_DECISION_THRESHOLD`, por defecto hereda el de tecleo).
+Soporta dos modos de entrenamiento:
+- **Datos reales**: `{ user_id, records:[...] }`.
+- **Datos sintéticos** (para demo antes de capturar): `{ user_id, synthetic:true, n:30 }`, generados
+  de forma **reproducible** por usuario.
+
+### 15.5. Endpoints del cursor
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/api/cursor/retrain/` | Entrena el modelo de cursor (real o sintético). |
+| POST | `/api/cursor/predict/` | Infiere y devuelve score + decisión. |
+| GET  | `/api/cursor/synthetic/` | Devuelve un dataset sintético reproducible (fixture/inspección). |
+
+### 15.6. Combinación tecleo + cursor
+Hoy son **modelos separados** con scores independientes. La **fusión** (p. ej. combinar scores por
+media ponderada o una regla AND/OR según el riesgo) es una decisión de producto documentada como
+trabajo futuro. La arquitectura ya lo permite: ambos modelos viven en el mismo servicio ML y
+comparten el patrón de features→modelo→score→umbral.
+
+---
+
+## 16. Medición de exactitud: benchmark EER
+
+Para responder a la exigencia de **demostrar el EER** de forma comprobable, el sistema incluye un
+benchmark reproducible.
+
+### 16.1. Cómo se calcula
+- Split **por sesión**: se entrena con sesiones 1-6 y se evalúa con sesiones 7-8 (no vistas) más
+  impostores de otros sujetos.
+- Se barren umbrales reales y se calculan **FAR**, **FRR**, **EER** y **AUC** por sujeto y agregados.
+- Se persiste el resultado en `docs/benchmark_eer.json` (versionado) mediante
+  `python manage.py benchmark_report`.
+
+### 16.2. Endpoints de métricas
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/metrics/summary/` | EER/FAR/FRR/AUC agregados y umbrales (referencia y óptimo). |
+| GET | `/api/metrics/curve/` | Puntos de la curva FAR/FRR en los umbrales de interés. |
+
+La pestaña **"Rendimiento"** del front (`MetricsDashboard.jsx`) consume estos endpoints y muestra
+EER, FAR/FRR, umbral y curva.
+
+### 16.3. Resultados de referencia
+Ver §10: EER ≈ 12.19 %, con FAR/FRR según umbral (16.3 %/11.1 % en el óptimo; 27.8 %/6.0 % en la
+línea base 0.0). El reporte completo está en `docs/REPORTE_EER.md` y `docs/benchmark_eer.json`.
+
+---
+
+## 17. Pruebas automatizadas
+
+Para dar respaldo de estabilidad y robustez (antes señalado como carencia):
+
+### 17.1. Microservicio ML (Python)
+`authentication_api/tests.py` cubre:
+- **Servicio ML**: `record_to_vector`, validación de NaN/inf, mínimo de muestras, `train_model`,
+  `load_model`, `predict`, `evaluate_model` (FAR/FRR/accuracy).
+- **Endpoints**: `/api/retrain/` y `/api/predict/` (casos válidos e inválidos; auditoría).
+- **Cursor**: entrenamiento real y sintético, predicción, dataset sintético reproducible.
+- **Métricas**: carga del benchmark, resumen y curva.
+
+### 17.2. Backend (Java)
+`Backend/src/test/` incluye pruebas de los flujos de autenticación y verificación/orquestación.
+
+### 17.3. Cómo ejecutarlas
+```bash
+# Python
+cd Modelo_predictivo_contrasenas
+python manage.py test
+
+# Java
+cd Backend
+mvn test
+```
+La suite usa `continuous_auth/test_settings.py` (base de datos de prueba, sin tocar datos reales).
+
+---
+
+## 18. Despliegue en Render (guía y correcciones)
+
+El sistema se despliega en **Render** como 3 Web Services + 1 PostgreSQL. La guía completa, el
+registro de **problemas encontrados y sus correcciones**, y la tabla de variables están en
+[`Modelo_predictivo_contrasenas/docs/DESPLIEGUE_RENDER.md`](Modelo_predictivo_contrasenas/docs/DESPLIEGUE_RENDER.md).
+
+Resumen de variables manuales (las únicas 2 que se escriben a mano):
+
+| Servicio | Key | Valor |
+|---|---|---|
+| backend | `ML_BASE_URL` | `https://continuous-auth-ml.onrender.com` (sin `/api`, con `https://`) |
+| front | `VITE_API_URL` | `https://continuous-auth-backend.onrender.com/api` (con `/api`) |
+
+**Correcciones destacadas del despliegue** (detalle en el doc):
+1. `render.yaml` de `runtime: python` → **`runtime: docker`** (para ejecutar el entrypoint que migra/siembra).
+2. `ML_BASE_URL`/`VITE_API_URL` como **`sync: false`** (Render entrega `host:port` sin esquema y rompería el cliente Java y el front).
+3. **`VITE_API_URL` requiere rebuild** del front (Vite la incrusta en build).
+4. Error «El usuario s002 no existe»: **no era falta de `.joblib`**, sino falta de `UserProfile` en la BD nueva → se resuelve entrenando el **modelo propio** por usuario.
+5. `.dockerignore` ahora excluye **`.venv/`** (imagen mucho más ligera).
+6. `.gitignore` corregido con **`**/ml_models/cursor_iforest_*.joblib`** (antes solo cubría la raíz).
+7. En plan free los modelos de usuario **no persisten** (sin Disco): se regeneran al **re-entrenar**.
+
+---
+
+## 19. Perspectivas éticas, sociales y humanas
+
+El detalle está en [`Modelo_predictivo_contrasenas/docs/PERSPECTIVAS_ETICAS_SOCIALES.md`](Modelo_predictivo_contrasenas/docs/PERSPECTIVAS_ETICAS_SOCIALES.md).
+Síntesis:
+
+- **Ética**: consentimiento informado (pendiente de pantalla explícita), minimización (solo features,
+  no contenido), retención y derecho de supresión (cascade), transparencia (score/decisión
+  visibles), **equidad** (riesgo de sesgo por teclado/idioma/condición motora), gobernanza de datos.
+- **Social**: adopción organizacional (protege la sesión, no solo el login), dinámicas de equipos que
+  comparten estación, efectos colectivos (reducción de fraude vs riesgo de exclusión).
+- **Cultural**: la contraseña fija del dataset es anglocéntrica; se documenta la necesidad de
+  layouts/idiomas diversos como limitación.
+- **Humana**: el sistema **sugiere**, no bloquea irreversiblemente; el usuario puede **re-entrenar**;
+  decisión humana en el bucle.
+- **Impacto** (Rel5) y **transferibilidad interdisciplinar** (Uni5): estimaciones cualitativas
+  declaradas y glosario interpretable por disciplinas no técnicas.
+
+La evaluación por criterios (los 10 ingredientes) con la evidencia y las correcciones de cada uno
+está en [`Modelo_predictivo_contrasenas/docs/EVALUACION_Y_CORRECCIONES.md`](Modelo_predictivo_contrasenas/docs/EVALUACION_Y_CORRECCIONES.md).
+
+---
+
+## 20. Referencias
 
 - Killourhy, K. S., & Maxion, R. A. (2009). *Comparing Anomaly-Detection Algorithms for Keystroke
   Dynamics*. IEEE/IFIP DSN, 125–134. — Dataset **CMU DSL-StrongPasswordData**.
@@ -719,3 +894,7 @@ Cada componente trae su `Dockerfile`:
 - **decision_function**: score continuo; negativo = anomalía, no negativo = normal.
 - **FAR / FRR / EER / AUC**: métricas de evaluación de un sistema biométrico.
 - **Modelo activo**: el modelo usado al verificar; propio del usuario o del dataset.
+- **Mouse dynamics**: biometría basada en cómo se mueve el cursor (velocidad, aceleración, curvatura, clics).
+- **M.* features**: las 12 métricas temporales del cursor.
+- **Multimodal**: uso conjunto de dos o más señales biométricas (aquí, tecleo + cursor).
+- **Benchmark**: medición reproducible de FAR/FRR/EER/AUC sobre un split por sesión.
